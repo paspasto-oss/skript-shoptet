@@ -1,0 +1,15 @@
+{
+  "manufacturer": "Midea",
+  "supplier": "Planning & Trading Slovakia s.r.o.",
+  "vat_rate": 23,
+  "price_mode": "recommended",
+  "margin_multiplier": 2.15,
+  "only_complete_sets": true,
+  "including_vat": 0,
+  "purchase_price_including_vat": 0,
+  "stock": 0,
+  "availability_in_stock": "Skladom",
+  "availability_out_of_stock": "Na objednávku",
+  "unit": "ks",
+  "product_visibility": "visible"
+}
