@@ -1,25 +1,15 @@
 from __future__ import annotations
 
-import json
 import threading
 import traceback
 from pathlib import Path
 from tkinter import BooleanVar, Button, Checkbutton, Entry, Label, StringVar, Tk, filedialog, messagebox
 
-from shoptet_importer.adapters import midea_products_to_universal
 from shoptet_importer.database import ProductDatabase
 from shoptet_importer.db_export import export_db_to_shoptet_csv
-from shoptet_importer.export import write_report
-from shoptet_importer.midea_pdf import extract_products
+from shoptet_importer.generic_pdf import extract_products_generic
 
 APP_TITLE = "Spektra Product Manager"
-
-
-def load_config() -> dict:
-    path = Path("config.json")
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {}
 
 
 class App:
@@ -33,7 +23,7 @@ class App:
         self.out_dir = StringVar(value=str(Path("output").resolve()))
         self.db_path = StringVar(value=str(Path("data/products.sqlite").resolve()))
         self.limit_10 = BooleanVar(value=True)
-        self.status = StringVar(value="Vyber PDF cennik Midea a klikni Importovat do databazy.")
+        self.status = StringVar(value="Vyber PDF cennik a klikni Importovat do databazy.")
 
         Label(self.root, text="Spektra Product Manager", font=("Arial", 18, "bold")).place(x=20, y=18)
         Label(self.root, text="Univerzalny produktovy importer pre Shoptet", font=("Arial", 10)).place(x=22, y=55)
@@ -82,7 +72,7 @@ class App:
             messagebox.showerror(APP_TITLE, "Vyber platny PDF subor.")
             return
         db_path = Path(self.db_path.get())
-        self.status.set("Spracuvam PDF a zapisujem produkty do databazy...")
+        self.status.set("Spracuvam PDF univerzalnym parserom a zapisujem produkty do databazy...")
         threading.Thread(target=self._import_worker, args=(pdf, db_path), daemon=True).start()
 
     def export_db(self) -> None:
@@ -97,26 +87,19 @@ class App:
 
     def _import_worker(self, pdf: Path, db_path: Path) -> None:
         try:
-            config = load_config()
             limit = 10 if self.limit_10.get() else None
-            parsed, skipped = extract_products(pdf, config, limit=limit)
-            if not parsed:
-                raise RuntimeError("Parser nenasiel ziadne kompletne sety.")
+            products, skipped = extract_products_generic(pdf, limit=limit)
+            if not products:
+                raise RuntimeError("Parser nenasiel ziadne produkty. Treba doplnit pravidlo pre tento format PDF.")
 
-            universal_products = midea_products_to_universal(parsed)
             db = ProductDatabase(db_path)
             try:
-                imported = db.upsert_many(universal_products)
-                db.log_import("Midea/MDV PDF", imported, len(skipped))
+                imported = db.upsert_many(products)
+                db.log_import(str(pdf), imported, len(skipped))
             finally:
                 db.close()
 
-            out_dir = Path(self.out_dir.get())
-            out_dir.mkdir(parents=True, exist_ok=True)
-            report_path = out_dir / ("kontrola_midea_test_10.csv" if limit else "kontrola_midea_full.csv")
-            write_report(parsed, skipped, report_path)
-
-            self.status.set(f"Hotovo: {imported} produktov ulozenych do DB. Kontrola: {report_path}")
+            self.status.set(f"Hotovo: {imported} produktov ulozenych do DB. Preskocene: {len(skipped)}")
             messagebox.showinfo(APP_TITLE, f"Import do databazy hotovy.\n\nProdukty: {imported}\nPreskocene riadky: {len(skipped)}\nDB: {db_path}")
         except Exception as exc:
             traceback.print_exc()
