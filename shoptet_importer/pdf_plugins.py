@@ -4,7 +4,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .generic_pdf import build_description, clean, extract_text_pages, guess_category, parse_price
+from .content_templates import enrich_product_content
+from .generic_pdf import clean, extract_text_pages, guess_category, parse_price
 from .product_model import UniversalProduct
 
 CODE_DOTTED_RE = re.compile(r"^\d\.\d{3}\.\d{5}$")
@@ -38,11 +39,24 @@ def detect_pdf_plugin(pdf_path: Path, pages: list[tuple[int, list[str]]]) -> str
 
 
 def _finish_product(product: UniversalProduct) -> UniversalProduct:
-    product.short_description = product.short_description or " / ".join(x for x in [product.manufacturer, product.model, product.category] if x)[:255]
-    product.seo_title = product.seo_title or product.name[:70]
-    product.meta_description = product.meta_description or f"{product.name} – kód {product.code}."[:155]
-    product.description = product.description or build_description(product)
-    return product
+    return enrich_product_content(product)
+
+
+def _extract_blumut_params(text: str) -> dict[str, str]:
+    params: dict[str, str] = {"popis": text}
+    pump = re.search(r"čerpadlo\s+([^\-]+?)(?:\s+-|$)", text, re.I)
+    if pump:
+        params["cerpadlo"] = pump.group(1).strip()
+    temp = re.search(r"(\d{2})°C", text)
+    if temp:
+        params["teplota"] = temp.group(1) + " °C"
+    power = re.search(r"výkon\s+(\d+\s*kW)", text, re.I)
+    if power:
+        params["vykon"] = power.group(1).strip()
+    conn = re.search(r"pripojenie\s+([^\-]+)", text, re.I)
+    if conn:
+        params["pripojenie"] = conn.group(1).strip()
+    return params
 
 
 def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[UniversalProduct], list[dict[str, Any]]]:
@@ -55,11 +69,12 @@ def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[Uni
     for page_no, lines in pages:
         i = 0
         while i < len(lines):
+            line_upper = lines[i].upper()
             code = clean(lines[i])
             if not CODE_DOTTED_RE.match(code):
-                if "BLUMUT HE DN 32" in lines[i].upper():
+                if "BLUMUT HE DN 32" in line_upper:
                     context = "Vykurovanie > Protikondenzačné jednotky > BLUMUT HE DN32"
-                elif "BLUMUT COMPACT" in lines[i].upper():
+                elif "BLUMUT COMPACT" in line_upper:
                     context = "Vykurovanie > Protikondenzačné jednotky > BLUMUT Compact HE DN25"
                 i += 1
                 continue
@@ -72,7 +87,6 @@ def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[Uni
                     break
                 j += 1
 
-            price = 0.0
             if block and _is_price(block[-1]):
                 price = parse_price(block[-1])
                 block = block[:-1]
@@ -90,14 +104,16 @@ def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[Uni
             desc_lines: list[str] = []
             for part in block:
                 if part.upper() in {"WILO", "DAB", "GRUNDFOS"} or part.startswith("Blumut") or re.search(r"DN \d+", part):
-                    model_lines.append(part)
+                    model_lines.append(part.replace("Copmact", "Compact"))
                 else:
-                    desc_lines.append(part)
+                    desc_lines.append(part.replace("Copmact", "Compact"))
             model = " ".join(model_lines).strip()
-            desc = " ".join(desc_lines).strip()
-            if not desc:
-                desc = model
-            name = f"Blumut {model}".strip() if model else f"Blumut {desc[:90]}"
+            desc = " ".join(desc_lines).strip() or model
+
+            if model:
+                name = model if model.upper().startswith("BLUMUT") else f"BLUMUT {model}"
+            else:
+                name = f"BLUMUT {desc[:90]}"
 
             product = UniversalProduct(
                 code=code,
@@ -105,14 +121,14 @@ def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[Uni
                 supplier="K-KOMPONENT s.r.o.",
                 manufacturer="BLUMUT",
                 supplier_code=code,
-                model=model,
+                model=model or code,
                 category=context,
                 purchase_price=price,
                 sale_price=round(price * 1.35, 2),
                 standard_price=0,
                 source=f"blumut_pdf:{pdf_path.name}",
                 source_page=page_no,
-                parameters={"popis": desc},
+                parameters=_extract_blumut_params(desc),
             )
             products.append(_finish_product(product))
             seen.add(code)
@@ -130,7 +146,6 @@ def parse_vaillant_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[U
     current_category = "Produkty > Vaillant"
 
     for page_no, lines in pages:
-        # category from page headers
         for head in lines[:12]:
             h = head.lower()
             if "tepelné čerpadlá" in h or "tepelne čerpadla" in h:
@@ -162,7 +177,6 @@ def parse_vaillant_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[U
                         j += 1
                         break
                 else:
-                    # skip pure table labels and numeric parameter columns if short
                     if not re.match(r"^(A\+\+\+|A\+\+|A\+|A|R32|R410A|\d{1,2}[,.]\d|\d{1,2})$", t):
                         block.append(t)
                 j += 1
@@ -182,8 +196,9 @@ def parse_vaillant_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[U
             name = desc[:180] if desc else f"Vaillant {code}"
             if not name.lower().startswith("vaillant"):
                 name = f"Vaillant {name}"
-            refrigerant = REFRIGERANT_RE.search(" ".join(lines[max(0, i - 5):j]))
-            power = POWER_RE.search(" ".join(lines[max(0, i - 5):j]))
+            text_window = " ".join(lines[max(0, i - 5):j])
+            refrigerant = REFRIGERANT_RE.search(text_window)
+            power = POWER_RE.search(text_window)
 
             product = UniversalProduct(
                 code=code,
@@ -191,7 +206,7 @@ def parse_vaillant_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[U
                 supplier="Vaillant Group Slovakia, s.r.o.",
                 manufacturer="Vaillant",
                 supplier_code=code,
-                model="",
+                model=code,
                 category=current_category,
                 purchase_price=action_price,
                 sale_price=action_price,
