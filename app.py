@@ -19,43 +19,48 @@ class App:
     def __init__(self) -> None:
         self.root = Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("820x500")
+        self.root.geometry("880x540")
         self.root.resizable(False, False)
 
         self.input_path = StringVar()
+        self.template_path = StringVar()
         self.out_dir = StringVar(value=str(Path("output").resolve()))
         self.db_path = StringVar(value=str(Path("data/products.sqlite").resolve()))
         self.limit_10 = BooleanVar(value=True)
-        self.status = StringVar(value="Vyber cennik PDF/Excel/CSV/XML a klikni Importovat do databazy.")
+        self.status = StringVar(value="Vyber cennik dodavatela a sablonu exportu zo Shoptetu.")
 
         Label(self.root, text="Spektra Product Manager", font=("Arial", 18, "bold")).place(x=20, y=18)
-        Label(self.root, text="PIM jadro: import cennikov, produktova databaza, export Shoptet", font=("Arial", 10)).place(x=22, y=55)
+        Label(self.root, text="Import cennikov dodavatelov do databazy a export podla Shoptet sablony", font=("Arial", 10)).place(x=22, y=55)
 
-        Label(self.root, text="Cennik:").place(x=22, y=95)
-        Entry(self.root, textvariable=self.input_path, width=82).place(x=140, y=95)
-        Button(self.root, text="Vybrat", command=self.choose_input).place(x=690, y=91)
+        Label(self.root, text="Cennik dodavatela:").place(x=22, y=95)
+        Entry(self.root, textvariable=self.input_path, width=84).place(x=160, y=95)
+        Button(self.root, text="Vybrat", command=self.choose_input).place(x=735, y=91)
 
-        Label(self.root, text="Databaza:").place(x=22, y=135)
-        Entry(self.root, textvariable=self.db_path, width=82).place(x=140, y=135)
-        Button(self.root, text="Vybrat", command=self.choose_db).place(x=690, y=131)
+        Label(self.root, text="Shoptet sablona:").place(x=22, y=135)
+        Entry(self.root, textvariable=self.template_path, width=84).place(x=160, y=135)
+        Button(self.root, text="Vybrat", command=self.choose_template).place(x=735, y=131)
 
-        Label(self.root, text="Vystup:").place(x=22, y=175)
-        Entry(self.root, textvariable=self.out_dir, width=82).place(x=140, y=175)
-        Button(self.root, text="Vybrat", command=self.choose_out_dir).place(x=690, y=171)
+        Label(self.root, text="Databaza:").place(x=22, y=175)
+        Entry(self.root, textvariable=self.db_path, width=84).place(x=160, y=175)
+        Button(self.root, text="Vybrat", command=self.choose_db).place(x=735, y=171)
 
-        Checkbutton(self.root, text="Test iba 10 produktov", variable=self.limit_10).place(x=140, y=215)
+        Label(self.root, text="Vystup:").place(x=22, y=215)
+        Entry(self.root, textvariable=self.out_dir, width=84).place(x=160, y=215)
+        Button(self.root, text="Vybrat", command=self.choose_out_dir).place(x=735, y=211)
 
-        Button(self.root, text="1. IMPORTOVAT CENNIK DO DB", width=30, height=2, command=self.import_to_db).place(x=55, y=260)
-        Button(self.root, text="2. PRODUKTOVY EDITOR", width=26, height=2, command=self.open_editor).place(x=305, y=260)
-        Button(self.root, text="3. EXPORT PRE SHOPTET", width=30, height=2, command=self.export_db).place(x=530, y=260)
+        Checkbutton(self.root, text="Test iba 10 produktov", variable=self.limit_10).place(x=160, y=255)
 
-        Button(self.root, text="KONTROLA SHOPTET IMPORTU", width=34, command=self.validate_shoptet).place(x=290, y=325)
+        Button(self.root, text="1. IMPORTOVAT CENNIK DO DB", width=30, height=2, command=self.import_to_db).place(x=55, y=305)
+        Button(self.root, text="2. PRODUKTOVY EDITOR", width=26, height=2, command=self.open_editor).place(x=320, y=305)
+        Button(self.root, text="3. EXPORT PRE SHOPTET", width=30, height=2, command=self.export_db).place(x=550, y=305)
 
-        Label(self.root, textvariable=self.status, wraplength=760, justify="left").place(x=25, y=390)
+        Button(self.root, text="KONTROLA SHOPTET IMPORTU", width=34, command=self.validate_shoptet).place(x=320, y=375)
+
+        Label(self.root, textvariable=self.status, wraplength=820, justify="left").place(x=25, y=440)
 
     def choose_input(self) -> None:
         selected = filedialog.askopenfilename(
-            title="Vyber cennik",
+            title="Vyber cennik dodavatela",
             filetypes=[
                 ("Podporovane subory", "*.pdf *.csv *.xlsx *.xls *.xml"),
                 ("PDF subory", "*.pdf"),
@@ -67,6 +72,19 @@ class App:
         )
         if selected:
             self.input_path.set(selected)
+
+    def choose_template(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Vyber export zo Shoptetu ako sablonu",
+            filetypes=[
+                ("Shoptet CSV/XLSX", "*.csv *.xlsx *.xls"),
+                ("CSV subory", "*.csv"),
+                ("Excel subory", "*.xlsx *.xls"),
+                ("Vsetky subory", "*.*"),
+            ],
+        )
+        if selected:
+            self.template_path.set(selected)
 
     def choose_out_dir(self) -> None:
         selected = filedialog.askdirectory(title="Vyber vystupny priecinok")
@@ -106,10 +124,14 @@ class App:
         if not db_path.exists():
             messagebox.showerror(APP_TITLE, "Databaza este neexistuje. Najprv importuj cennik do DB.")
             return
+        template = Path(self.template_path.get()) if self.template_path.get().strip() else None
+        if template is not None and not template.exists():
+            messagebox.showerror(APP_TITLE, "Vybrana Shoptet sablona neexistuje.")
+            return
         out_dir = Path(self.out_dir.get())
         out_dir.mkdir(parents=True, exist_ok=True)
-        self.status.set("Exportujem databazu do Shoptet CSV...")
-        threading.Thread(target=self._export_worker, args=(db_path, out_dir), daemon=True).start()
+        self.status.set("Exportujem databazu do Shoptet CSV podla sablony...")
+        threading.Thread(target=self._export_worker, args=(db_path, out_dir, template), daemon=True).start()
 
     def validate_shoptet(self) -> None:
         db_path = Path(self.db_path.get())
@@ -150,18 +172,19 @@ class App:
             self.status.set("Chyba pri importe do databazy.")
             messagebox.showerror(APP_TITLE, str(exc))
 
-    def _export_worker(self, db_path: Path, out_dir: Path) -> None:
+    def _export_worker(self, db_path: Path, out_dir: Path, template: Path | None) -> None:
         try:
             csv_path = out_dir / "shoptet_products_import.csv"
             report_path = out_dir / "shoptet_import_kontrola.csv"
-            count = export_db_to_shoptet_csv(db_path, csv_path, active_only=True)
+            count = export_db_to_shoptet_csv(db_path, csv_path, active_only=True, template_path=template)
             _, errors = create_shoptet_validation_report(db_path, report_path, active_only=True)
             if errors:
                 self.status.set(f"Export hotovy, ale kontrola nasla chyby: {errors}. CSV: {csv_path}. Report: {report_path}")
                 messagebox.showwarning(APP_TITLE, f"Export hotovy, ale kontrola nasla chyby.\n\nProdukty: {count}\nChybne produkty: {errors}\nCSV: {csv_path}\nReport: {report_path}")
             else:
+                tpl = f"\nSablona: {template}" if template else "\nSablona: fallback minimalna hlavicka"
                 self.status.set(f"Hotovo: {count} produktov pripravenych na import do Shoptetu. CSV: {csv_path}")
-                messagebox.showinfo(APP_TITLE, f"Subor pre Shoptet je pripraveny.\n\nProdukty: {count}\nCSV: {csv_path}\nKontrola: bez chyb")
+                messagebox.showinfo(APP_TITLE, f"Subor pre Shoptet je pripraveny.\n\nProdukty: {count}\nCSV: {csv_path}{tpl}\nKontrola: bez chyb")
         except Exception as exc:
             traceback.print_exc()
             self.status.set("Chyba pri exporte do Shoptetu.")
