@@ -8,43 +8,17 @@ from pathlib import Path
 from typing import Any
 
 
-SHOPTET_HEADERS = [
-    "code",
-    "pairCode",
-    "name",
-    "price",
-    "shortDescription",
-    "description",
-    "supplier",
-    "manufacturer",
-    "itemType",
-    "productNumber",
-    "partNumber",
-    "defaultCategory",
-    "standardPrice",
-    "purchasePrice",
-    "purchasePriceIncludingVat",
-    "currency",
-    "includingVat",
-    "percentVat",
-    "stock",
-    "availabilityOutOfStock",
-    "availabilityInStock",
-    "unit",
-    "productVisibility",
-    "seoTitle",
-    "metaDescription",
-    "image",
-    "internalNote",
-]
+# Presne poradie stlpcov z realneho exportu Shoptetu pouzivatela.
+SHOPTET_HEADERS = ['code', 'pairCode', 'name', 'guid', 'externalId', 'appendix', 'shortDescription', 'description', 'manufacturer', 'supplier', 'metaDescription', 'itemType', 'ean', 'productNumber', 'partNumber', 'serialNumber', 'plu', 'defaultImage', 'image', 'imageDesc', 'image2', 'imageDesc2', 'image3', 'imageDesc3', 'image4', 'imageDesc4', 'defaultCategory', 'categoryText', 'price', 'priceRatio', 'standardPrice', 'purchasePrice', 'purchasePriceVatRate', 'purchasePriceIncludingVat', 'currency', 'includingVat', 'percentVat', 'actionPrice', 'actionFrom', 'actionUntil', 'minimumAmount', 'maximumAmount', 'freeShipping', 'freeBilling', 'maxDiscount', 'applyDiscountCoupon', 'applyLoyaltyDiscount', 'applyQuantityDiscount', 'applyVolumeDiscount', 'relativeMargin', 'absoluteMargin', 'variant:Farba', 'variant:Veľkosť', 'stock', 'stockLocation', 'stockMinSupply', 'negativeAmount', 'availabilityOutOfStock', 'availabilityInStock', 'unit', 'decimalCount', 'warranty', 'weight', 'height', 'depth', 'width', 'recommendedPackaging', 'firmyCz', 'relatedProduct', 'alternativeProduct', 'gifts', 'textProperty', 'textProperty2', 'textProperty3', 'textProperty4', 'textProperty5', 'textProperty6', 'textProperty7', 'textProperty8', 'textProperty9', 'textProperty10', 'textProperty11', 'textProperty12', 'externalCode', 'variantVisibility', 'productVisibility', 'adult', 'atypicalShipping', 'atypicalBilling', 'boxRestriction', 'actionFlagActive', 'actionFlagValidFrom', 'actionFlagValidUntil', 'tipFlagActive', 'tipFlagValidFrom', 'tipFlagValidUntil', 'newFlagActive', 'newFlagValidFrom', 'newFlagValidUntil', 'custom1FlagActive', 'custom1FlagValidFrom', 'custom1FlagValidUntil', 'custom2FlagActive', 'custom2FlagValidFrom', 'custom2FlagValidUntil', 'custom3FlagActive', 'custom3FlagValidFrom', 'custom3FlagValidUntil', 'relatedVideo', 'allowsIPlatba', 'allowsPayOnline', 'xmlFeedName', 'seoTitle', 'heurekaHidden', 'heurekaCartHidden', 'heurekaCpc', 'zboziHidden', 'zboziCpc', 'zboziSearchCpc', 'arukeresoHidden', 'arukeresoMarketplaceHidden', 'sizeId', 'sizeIdLabel', 'depositCode', 'depositLogic', 'packageAmount', 'packageAmountUnit', 'measureAmount', 'measureAmountUnit', 'internalNote', 'itemConditionGrade', 'itemConditionDescription', 'googleCategoryIdInFeed', 'heurekaCategoryId', 'zboziCategoryId', 'googleCategoryId', 'glamiCategoryId']
 
-
-def _fmt(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float):
-        return f"{value:.2f}".rstrip("0").rstrip(".")
-    return str(value)
+PARAM_LABELS = {
+    "vykon": "Výkon",
+    "teplota": "Otváracia teplota",
+    "cerpadlo": "Čerpadlo",
+    "pripojenie": "Pripojenie",
+    "chladivo": "Chladivo",
+    "popis": "Popis",
+}
 
 
 def _safe_text(value: Any, max_len: int | None = None) -> str:
@@ -55,23 +29,61 @@ def _safe_text(value: Any, max_len: int | None = None) -> str:
 
 
 def _safe_html(value: Any) -> str:
-    return str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    return text
 
 
-def _number(value: Any, fallback: float = 0.0) -> str:
+def _number(value: Any, fallback: float = 0.0, comma: bool = True) -> str:
     try:
         val = float(value or 0)
     except Exception:
         val = fallback
-    return f"{val:.2f}".rstrip("0").rstrip(".")
+    out = f"{val:.2f}".rstrip("0").rstrip(".")
+    return out.replace(".", ",") if comma else out
+
+
+def _params_from_json(raw: str | None) -> dict[str, Any]:
+    try:
+        return json.loads(raw or "{}")
+    except Exception:
+        return {}
+
+
+def _text_properties(params: dict[str, Any], manufacturer: str, model: str, code: str) -> list[str]:
+    items: list[tuple[str, str]] = []
+
+    for key in ["vykon", "teplota", "cerpadlo", "pripojenie", "chladivo"]:
+        value = _safe_text(params.get(key))
+        if value:
+            items.append((PARAM_LABELS.get(key, key), value))
+
+    if manufacturer:
+        items.append(("Výrobca", manufacturer))
+    if model:
+        items.append(("Model", model))
+    if code:
+        items.append(("Kód produktu", code))
+
+    # Shoptet upozorni, ked produkt nema ziadne parametre. Preto vzdy posleme aspon zaklad.
+    seen: set[str] = set()
+    out: list[str] = []
+    for label, value in items:
+        label = _safe_text(label, 64)
+        value = _safe_text(value, 255)
+        if not label or not value:
+            continue
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f"{label};{value}")
+        if len(out) >= 12:
+            break
+    return out
 
 
 def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
-    params = {}
-    try:
-        params = json.loads(row["parameters_json"] or "{}")
-    except Exception:
-        params = {}
+    params = _params_from_json(row["parameters_json"])
 
     price = float(row["sale_price"] or 0)
     purchase_price = float(row["purchase_price"] or 0)
@@ -81,51 +93,84 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
     if price <= 0 and purchase_price > 0:
         price = round(purchase_price * 1.35, 2)
 
-    name = _safe_text(row["name"], 255)
     code = _safe_text(row["code"], 64)
+    name = _safe_text(row["name"], 255)
+    manufacturer = _safe_text(row["manufacturer"], 128)
+    supplier = _safe_text(row["supplier"], 128)
     category = _safe_text(row["category"] or "Produkty", 255)
-    unit = _safe_text(row["unit"] or "ks", 16)
-    vat_rate = int(row["vat_rate"] or 23)
     model = _safe_text(row["model"] or row["supplier_code"] or code, 128)
+    description = _safe_html(row["description"])
+    short_description = _safe_html(row["short_description"])
 
-    internal_parts = [
-        f"Zdroj: {row['source'] or ''}",
-        f"Nakupna cena: {_number(purchase_price)} {row['currency'] or 'EUR'}",
-    ]
-    if row["source_page"]:
-        internal_parts.append(f"Strana: {row['source_page']}")
-    if params:
-        internal_parts.append("Parametre: " + json.dumps(params, ensure_ascii=False))
+    if not description:
+        description = f"<h2>{name}</h2><p>{short_description or name}</p>"
+    if not short_description:
+        short_description = f"<p>{name}</p>"
 
-    return {
+    result = {header: "" for header in SHOPTET_HEADERS}
+
+    result.update({
         "code": code,
         "pairCode": code,
         "name": name,
-        "price": _number(price),
-        "shortDescription": _safe_text(row["short_description"], 255),
-        "description": _safe_html(row["description"]),
-        "supplier": _safe_text(row["supplier"], 128),
-        "manufacturer": _safe_text(row["manufacturer"], 128),
+        "guid": "",
+        "externalId": "",
+        "appendix": "",
+        "shortDescription": short_description,
+        "description": description,
+        "manufacturer": manufacturer,
+        "supplier": supplier,
+        "metaDescription": _safe_text(row["meta_description"] or f"{name} – kód {code}.", 155),
         "itemType": "product",
+        "ean": _safe_text(row["ean"], 32) if "ean" in row.keys() else "",
         "productNumber": model,
         "partNumber": model,
+        "serialNumber": "",
+        "plu": "",
+        "defaultImage": "",
+        "image": _safe_text(row["image_url"], 512),
         "defaultCategory": category,
-        "standardPrice": _number(standard_price),
-        "purchasePrice": _number(purchase_price),
+        "categoryText": category,
+        "price": _number(price, comma=True),
+        "priceRatio": "",
+        "standardPrice": _number(standard_price, comma=True) if standard_price > 0 else "",
+        "purchasePrice": _number(purchase_price, comma=True) if purchase_price > 0 else "",
+        "purchasePriceVatRate": str(int(row["vat_rate"] or 23)),
         "purchasePriceIncludingVat": "0",
         "currency": _safe_text(row["currency"] or "EUR", 3),
-        "includingVat": "0",
-        "percentVat": str(vat_rate),
-        "stock": _number(row["stock"]),
+        "includingVat": "1",
+        "percentVat": str(int(row["vat_rate"] or 23)),
+        "stock": _number(row["stock"], comma=True),
+        "negativeAmount": "0",
         "availabilityOutOfStock": _safe_text(row["availability_out_of_stock"] or "Na objednávku", 64),
         "availabilityInStock": _safe_text(row["availability_in_stock"] or "Skladom", 64),
-        "unit": unit,
+        "unit": _safe_text(row["unit"] or "ks", 16),
+        "decimalCount": "0",
         "productVisibility": "visible" if row["active"] else "hidden",
+        "adult": "0",
         "seoTitle": _safe_text(row["seo_title"] or name, 70),
-        "metaDescription": _safe_text(row["meta_description"], 155),
-        "image": _safe_text(row["image_url"], 512),
-        "internalNote": _safe_text(" | ".join(x for x in internal_parts if x), 2048),
-    }
+        "heurekaHidden": "0",
+        "heurekaCartHidden": "0",
+        "zboziHidden": "0",
+        "arukeresoHidden": "0",
+        "arukeresoMarketplaceHidden": "0",
+        "internalNote": _safe_text(
+            f"Zdroj: {row['source'] or ''} | Nakupna cena: {_number(purchase_price, comma=True)} {row['currency'] or 'EUR'}"
+            + (f" | Strana: {row['source_page']}" if row["source_page"] else ""),
+            2048,
+        ),
+    })
+
+    for i, prop in enumerate(_text_properties(params, manufacturer, model, code), start=1):
+        field = "textProperty" if i == 1 else f"textProperty{i}"
+        if field in result:
+            result[field] = prop
+
+    # Bez parametrov Shoptet novy produkt v niektorych nastaveniach preskoci.
+    if not result.get("textProperty"):
+        result["textProperty"] = f"Kód produktu;{code}"
+
+    return result
 
 
 def export_db_to_shoptet_csv(db_path: str | Path, out_path: str | Path, active_only: bool = True) -> int:
@@ -143,7 +188,7 @@ def export_db_to_shoptet_csv(db_path: str | Path, out_path: str | Path, active_o
         rows = list(conn.execute(sql))
 
         with out_path.open("w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=SHOPTET_HEADERS, delimiter=";")
+            writer = csv.DictWriter(f, fieldnames=SHOPTET_HEADERS, delimiter=";", extrasaction="ignore")
             writer.writeheader()
             for row in rows:
                 writer.writerow(product_row_to_shoptet(row))
