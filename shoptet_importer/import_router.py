@@ -6,6 +6,7 @@ from .csv_importer import import_csv_products
 from .generic_pdf import extract_products_generic
 from .product_model import UniversalProduct
 from .xlsx_importer import import_xlsx_products
+from .xml_importer import import_xml_products
 
 
 SUPPORTED_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls", ".xml"}
@@ -25,5 +26,7 @@ def import_file_to_products(path: str | Path, limit: int | None = None) -> tuple
         return import_csv_products(file_path, limit=limit)
     if ext in {".xlsx", ".xls"}:
         return import_xlsx_products(file_path, limit=limit)
+    if ext == ".xml":
+        return import_xml_products(file_path, limit=limit)
 
-    raise NotImplementedError("XML importer este nie je implementovany.")
+    raise ValueError(f"Nepodporovany format suboru: {ext}")
