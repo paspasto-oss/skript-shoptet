@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
-# Minimalny import pre Shoptet: pouzivame iba polia, ktore potrebujeme pre zalozenie produktu.
-# Dolezite: textProperty obsahuje bodkociarku vo vnutri hodnoty, preto exportujeme QUOTE_ALL.
+# Fallback, ked pouzivatel nevyberie sablonu zo Shoptetu.
+# Hlavny rezim je template_path = originalny export zo Shoptetu.
 SHOPTET_HEADERS = [
     "code",
     "pairCode",
@@ -72,6 +72,30 @@ PARAM_LABELS = {
 }
 
 
+def load_template_headers(template_path: str | Path | None) -> list[str]:
+    """Nacita hlavicku z exportu Shoptetu a pouzije ju bez uprav.
+
+    Toto je hlavny kompatibilny rezim: program negeneruje vlastne stlpce,
+    ale drzi presne rovnake poradie a nazvy stlpcov ako export zo Shoptetu.
+    """
+    if not template_path:
+        return SHOPTET_HEADERS
+    path = Path(template_path)
+    if not path.exists():
+        return SHOPTET_HEADERS
+    with path.open("r", encoding="utf-8-sig", newline="") as f:
+        sample = f.read(4096)
+        f.seek(0)
+        delimiter = ";" if sample.count(";") >= sample.count(",") else ","
+        reader = csv.reader(f, delimiter=delimiter)
+        try:
+            headers = next(reader)
+        except StopIteration:
+            return SHOPTET_HEADERS
+    cleaned = [str(h).strip() for h in headers if str(h).strip()]
+    return cleaned or SHOPTET_HEADERS
+
+
 def _safe_text(value: Any, max_len: int | None = None) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if max_len and len(text) > max_len:
@@ -132,7 +156,8 @@ def _text_properties(params: dict[str, Any], manufacturer: str, model: str, code
     return result
 
 
-def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
+def product_row_to_shoptet(row: sqlite3.Row, headers: list[str] | None = None) -> dict[str, str]:
+    headers = headers or SHOPTET_HEADERS
     params = _params_from_json(row["parameters_json"])
 
     price = float(row["sale_price"] or 0)
@@ -157,8 +182,9 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
     if not short_description:
         short_description = f"<p>{name}</p>"
 
-    result = {header: "" for header in SHOPTET_HEADERS}
-    result.update({
+    result = {header: "" for header in headers}
+
+    values = {
         "code": code,
         "pairCode": code,
         "name": name,
@@ -200,7 +226,11 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
             + (f" | Strana: {row['source_page']}" if row["source_page"] else ""),
             2048,
         ),
-    })
+    }
+
+    for key, value in values.items():
+        if key in result:
+            result[key] = value
 
     for i, prop in enumerate(_text_properties(params, manufacturer, model, code), start=1):
         field = "textProperty" if i == 1 else f"textProperty{i}"
@@ -210,10 +240,16 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
     return result
 
 
-def export_db_to_shoptet_csv(db_path: str | Path, out_path: str | Path, active_only: bool = True) -> int:
+def export_db_to_shoptet_csv(
+    db_path: str | Path,
+    out_path: str | Path,
+    active_only: bool = True,
+    template_path: str | Path | None = None,
+) -> int:
     db_path = Path(db_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    headers = load_template_headers(template_path)
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -227,7 +263,7 @@ def export_db_to_shoptet_csv(db_path: str | Path, out_path: str | Path, active_o
         with out_path.open("w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(
                 f,
-                fieldnames=SHOPTET_HEADERS,
+                fieldnames=headers,
                 delimiter=";",
                 quotechar='"',
                 quoting=csv.QUOTE_ALL,
@@ -236,7 +272,7 @@ def export_db_to_shoptet_csv(db_path: str | Path, out_path: str | Path, active_o
             )
             writer.writeheader()
             for row in rows:
-                writer.writerow(product_row_to_shoptet(row))
+                writer.writerow(product_row_to_shoptet(row, headers=headers))
         return len(rows)
     finally:
         conn.close()
