@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,25 @@ def _fmt(value: Any) -> str:
     return str(value)
 
 
+def _safe_text(value: Any, max_len: int | None = None) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if max_len and len(text) > max_len:
+        return text[:max_len].rstrip()
+    return text
+
+
+def _safe_html(value: Any) -> str:
+    return str(value or "").replace("\r", " ").replace("\n", " ").strip()
+
+
+def _number(value: Any, fallback: float = 0.0) -> str:
+    try:
+        val = float(value or 0)
+    except Exception:
+        val = fallback
+    return f"{val:.2f}".rstrip("0").rstrip(".")
+
+
 def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
     params = {}
     try:
@@ -53,9 +73,24 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
     except Exception:
         params = {}
 
+    price = float(row["sale_price"] or 0)
+    purchase_price = float(row["purchase_price"] or 0)
+    standard_price = float(row["standard_price"] or 0)
+    if price <= 0 and standard_price > 0:
+        price = standard_price
+    if price <= 0 and purchase_price > 0:
+        price = round(purchase_price * 1.35, 2)
+
+    name = _safe_text(row["name"], 255)
+    code = _safe_text(row["code"], 64)
+    category = _safe_text(row["category"] or "Produkty", 255)
+    unit = _safe_text(row["unit"] or "ks", 16)
+    vat_rate = int(row["vat_rate"] or 23)
+    model = _safe_text(row["model"] or row["supplier_code"] or code, 128)
+
     internal_parts = [
         f"Zdroj: {row['source'] or ''}",
-        f"Nakupna cena: {_fmt(row['purchase_price'])} {row['currency'] or 'EUR'}",
+        f"Nakupna cena: {_number(purchase_price)} {row['currency'] or 'EUR'}",
     ]
     if row["source_page"]:
         internal_parts.append(f"Strana: {row['source_page']}")
@@ -63,33 +98,33 @@ def product_row_to_shoptet(row: sqlite3.Row) -> dict[str, str]:
         internal_parts.append("Parametre: " + json.dumps(params, ensure_ascii=False))
 
     return {
-        "code": _fmt(row["code"]),
-        "pairCode": _fmt(row["code"]),
-        "name": _fmt(row["name"]),
-        "price": _fmt(row["sale_price"]),
-        "shortDescription": _fmt(row["short_description"]),
-        "description": _fmt(row["description"]),
-        "supplier": _fmt(row["supplier"]),
-        "manufacturer": _fmt(row["manufacturer"]),
+        "code": code,
+        "pairCode": code,
+        "name": name,
+        "price": _number(price),
+        "shortDescription": _safe_text(row["short_description"], 255),
+        "description": _safe_html(row["description"]),
+        "supplier": _safe_text(row["supplier"], 128),
+        "manufacturer": _safe_text(row["manufacturer"], 128),
         "itemType": "product",
-        "productNumber": _fmt(row["model"] or row["supplier_code"]),
-        "partNumber": _fmt(row["model"] or row["supplier_code"]),
-        "defaultCategory": _fmt(row["category"]),
-        "standardPrice": _fmt(row["standard_price"]),
-        "purchasePrice": _fmt(row["purchase_price"]),
+        "productNumber": model,
+        "partNumber": model,
+        "defaultCategory": category,
+        "standardPrice": _number(standard_price),
+        "purchasePrice": _number(purchase_price),
         "purchasePriceIncludingVat": "0",
-        "currency": _fmt(row["currency"] or "EUR"),
+        "currency": _safe_text(row["currency"] or "EUR", 3),
         "includingVat": "0",
-        "percentVat": _fmt(row["vat_rate"] or 23),
-        "stock": _fmt(row["stock"]),
-        "availabilityOutOfStock": _fmt(row["availability_out_of_stock"]),
-        "availabilityInStock": _fmt(row["availability_in_stock"]),
-        "unit": _fmt(row["unit"] or "ks"),
+        "percentVat": str(vat_rate),
+        "stock": _number(row["stock"]),
+        "availabilityOutOfStock": _safe_text(row["availability_out_of_stock"] or "Na objednávku", 64),
+        "availabilityInStock": _safe_text(row["availability_in_stock"] or "Skladom", 64),
+        "unit": unit,
         "productVisibility": "visible" if row["active"] else "hidden",
-        "seoTitle": _fmt(row["seo_title"]),
-        "metaDescription": _fmt(row["meta_description"]),
-        "image": _fmt(row["image_url"]),
-        "internalNote": " | ".join(x for x in internal_parts if x),
+        "seoTitle": _safe_text(row["seo_title"] or name, 70),
+        "metaDescription": _safe_text(row["meta_description"], 155),
+        "image": _safe_text(row["image_url"], 512),
+        "internalNote": _safe_text(" | ".join(x for x in internal_parts if x), 2048),
     }
 
 
