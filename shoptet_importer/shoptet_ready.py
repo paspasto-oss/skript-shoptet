@@ -7,7 +7,24 @@ from pathlib import Path
 from .db_export import product_row_to_shoptet
 
 
-REQUIRED_FIELDS = ["code", "name", "price", "defaultCategory", "manufacturer", "supplier", "percentVat", "unit"]
+REQUIRED_FIELDS = [
+    "code",
+    "pairCode",
+    "name",
+    "price",
+    "shortDescription",
+    "description",
+    "defaultCategory",
+    "categoryText",
+    "manufacturer",
+    "supplier",
+    "itemType",
+    "percentVat",
+    "includingVat",
+    "unit",
+    "productVisibility",
+    "textProperty",
+]
 
 
 def validate_shoptet_row(row: dict[str, str]) -> list[str]:
@@ -24,6 +41,8 @@ def validate_shoptet_row(row: dict[str, str]) -> list[str]:
         errors.append("includingVat musi byt 0 alebo 1")
     if row.get("productVisibility") not in {"visible", "hidden"}:
         errors.append("productVisibility musi byt visible alebo hidden")
+    if ";" not in row.get("textProperty", ""):
+        errors.append("textProperty musi byt vo formate Nazov parametra;Hodnota")
     return errors
 
 
