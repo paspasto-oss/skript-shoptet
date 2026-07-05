@@ -7,6 +7,15 @@ from typing import Any
 from .product_model import UniversalProduct
 
 
+LABELS = {
+    "vykon": "Výkon",
+    "teplota": "Otváracia teplota",
+    "cerpadlo": "Čerpadlo",
+    "pripojenie": "Pripojenie",
+    "chladivo": "Chladivo",
+}
+
+
 def _escape(value: Any) -> str:
     return html.escape(str(value or "").strip())
 
@@ -26,6 +35,10 @@ def normalize_brand_prefix(name: str, manufacturer: str) -> str:
     return value.replace("Copmact", "Compact")
 
 
+def clean_text(value: str) -> str:
+    return normalize_brand_prefix(value.replace("Copmact", "Compact"), "BLUMUT")
+
+
 def build_product_description(product: UniversalProduct) -> str:
     params = product.parameters or {}
     popis = params.get("popis") or product.short_description or product.name
@@ -37,7 +50,7 @@ def build_product_description(product: UniversalProduct) -> str:
     ]
     for key in ["vykon", "teplota", "cerpadlo", "pripojenie", "chladivo"]:
         if params.get(key):
-            rows.append((key.capitalize(), params[key]))
+            rows.append((LABELS.get(key, key.capitalize()), params[key]))
 
     table_rows = "".join(
         f"<tr><th>{_escape(label)}</th><td>{_escape(value)}</td></tr>" for label, value in rows if value
@@ -52,13 +65,15 @@ def build_product_description(product: UniversalProduct) -> str:
 def enrich_product_content(product: UniversalProduct) -> UniversalProduct:
     product.name = normalize_brand_prefix(product.name, product.manufacturer)
     if product.model:
-        product.model = product.model.replace("Copmact", "Compact")
+        product.model = clean_text(product.model)
     if product.short_description:
-        product.short_description = product.short_description.replace("Copmact", "Compact")
+        product.short_description = clean_text(product.short_description)
+
+    if not product.short_description:
+        product.short_description = " / ".join(x for x in [product.manufacturer, product.model, product.category] if x)[:255]
+    product.short_description = normalize_brand_prefix(product.short_description, product.manufacturer)
 
     product.seo_title = product.name[:70]
     product.meta_description = f"{product.name} – kód {product.code}. Produkt pre vykurovanie a technické inštalácie."[:155]
     product.description = build_product_description(product)
-    if not product.short_description:
-        product.short_description = " / ".join(x for x in [product.manufacturer, product.model, product.category] if x)[:255]
     return product
