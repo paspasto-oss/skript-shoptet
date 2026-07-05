@@ -42,18 +42,23 @@ def _finish_product(product: UniversalProduct) -> UniversalProduct:
     return enrich_product_content(product)
 
 
-def _extract_blumut_params(text: str) -> dict[str, str]:
-    params: dict[str, str] = {"popis": text}
-    pump = re.search(r"čerpadlo\s+([^\-]+?)(?:\s+-|$)", text, re.I)
+def _extract_blumut_params(desc: str, model: str = "") -> dict[str, str]:
+    params: dict[str, str] = {"popis": desc}
+    pump = re.search(r"čerpadlo\s+([^\-]+?)(?:\s+-|$)", desc, re.I)
     if pump:
         params["cerpadlo"] = pump.group(1).strip()
-    temp = re.search(r"(\d{2})°C", text)
+
+    # Teplota produktu je v modeli: DN 25 - 55°C. Neberieme max. teplotu média 110°C z popisu.
+    temp = re.search(r"-\s*(\d{2})\s*°C", model)
+    if not temp:
+        temp = re.search(r"(\d{2})\s*°C", model)
     if temp:
         params["teplota"] = temp.group(1) + " °C"
-    power = re.search(r"výkon\s+(\d+\s*kW)", text, re.I)
+
+    power = re.search(r"výkon\s+(\d+\s*kW)", desc, re.I)
     if power:
         params["vykon"] = power.group(1).strip()
-    conn = re.search(r"pripojenie\s+([^\-]+)", text, re.I)
+    conn = re.search(r"pripojenie\s+([^\-]+)", desc, re.I)
     if conn:
         params["pripojenie"] = conn.group(1).strip()
     return params
@@ -128,7 +133,7 @@ def parse_blumut_pdf(pdf_path: Path, limit: int | None = None) -> tuple[list[Uni
                 standard_price=0,
                 source=f"blumut_pdf:{pdf_path.name}",
                 source_page=page_no,
-                parameters=_extract_blumut_params(desc),
+                parameters=_extract_blumut_params(desc, model),
             )
             products.append(_finish_product(product))
             seen.add(code)
