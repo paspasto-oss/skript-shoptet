@@ -1,7 +1,15 @@
-name: Build Windows EXE
+name: Build Spektra Product Collector Windows
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "app.py"
+      - "product_editor.py"
+      - "requirements.txt"
+      - "shoptet_importer/**"
+      - ".github/workflows/build-windows.yml"
 
 jobs:
   build:
@@ -14,7 +22,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -23,10 +31,11 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller --onefile --windowed --name SpektraProductManager app.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name Spektra-Product-Collector app.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SpektraProductManager-Windows
-          path: dist/SpektraProductManager.exe
+          name: Spektra-Product-Collector-Windows
+          path: dist/Spektra-Product-Collector.exe
+          retention-days: 30
