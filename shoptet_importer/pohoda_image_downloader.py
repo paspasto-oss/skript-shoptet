@@ -188,10 +188,9 @@ def _try_engine(
     )
 
     for image in result.images:
-        # Strict rule: the actual image must be hosted on the official domain.
-        # This intentionally rejects unrelated search-engine results.
-        if not _host_matches(image.source_url, [domain]):
-            continue
+        # The search itself is restricted with site:official-domain.
+        # Do NOT require the JPG/PNG host to equal the manufacturer domain:
+        # many official sites serve product media from a CDN.
         if not _caption_matches(product, image.caption):
             continue
         return image
