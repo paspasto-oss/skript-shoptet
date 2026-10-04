@@ -98,20 +98,45 @@ def _clean_result_url(url: str) -> str:
     return url
 
 
-def search_pages(session: requests.Session, product: PohodaProduct, max_results: int = 8) -> list[str]:
+def _queries_for(product: PohodaProduct) -> list[str]:
     domains = OFFICIAL_DOMAINS.get(product.brand, [])
-    queries = []
+    queries: list[str] = []
     if domains:
         for domain in domains[:2]:
             queries.append(f'site:{domain} "{product.code}" "{product.name}"')
             queries.append(f'site:{domain} "{product.name}"')
     queries.extend([
         f'"{product.code}" "{product.name}"',
+        f'"{product.code}" {product.brand}',
         f'"{product.name}" product',
     ])
+    return queries
 
+
+def search_pages(session: requests.Session, product: PohodaProduct, max_results: int = 12) -> list[str]:
+    """Find product pages. Bing is primary, DuckDuckGo is fallback."""
     found: list[str] = []
-    for query in queries:
+
+    for query in _queries_for(product):
+        # 1) Bing web search
+        try:
+            response = session.get(
+                "https://www.bing.com/search",
+                params={"q": query, "count": 10},
+                timeout=20,
+            )
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            for a in soup.select("li.b_algo h2 a"):
+                href = a.get("href", "")
+                if href.startswith("http") and href not in found:
+                    found.append(href)
+                    if len(found) >= max_results:
+                        return found
+        except requests.RequestException:
+            pass
+
+        # 2) DuckDuckGo fallback
         try:
             response = session.get(
                 "https://html.duckduckgo.com/html/",
@@ -127,8 +152,51 @@ def search_pages(session: requests.Session, product: PohodaProduct, max_results:
                     if len(found) >= max_results:
                         return found
         except requests.RequestException:
-            continue
-        time.sleep(0.4)
+            pass
+
+        time.sleep(0.25)
+
+    return found
+
+
+def search_direct_images(session: requests.Session, product: PohodaProduct, max_results: int = 16) -> list[str]:
+    """Get direct image URLs from Bing Images. Official-domain queries are tried first."""
+    found: list[str] = []
+    for query in _queries_for(product):
+        try:
+            response = session.get(
+                "https://www.bing.com/images/search",
+                params={"q": query, "form": "HDRSC3"},
+                timeout=20,
+            )
+            response.raise_for_status()
+
+            # Bing embeds original image URL in JSON-like m attributes.
+            for match in re.finditer(r'["\\]murl["\\]\s*:\s*["\\](https?://.*?)(?<!\\)["\\]', response.text):
+                url = match.group(1).replace("\\/", "/").replace("\\u002f", "/")
+                url = html.unescape(url)
+                if url.startswith("http") and url not in found:
+                    found.append(url)
+                    if len(found) >= max_results:
+                        return found
+
+            soup = BeautifulSoup(response.text, "html.parser")
+            for a in soup.select("a.iusc"):
+                raw = a.get("m")
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                url = data.get("murl")
+                if isinstance(url, str) and url.startswith("http") and url not in found:
+                    found.append(url)
+                    if len(found) >= max_results:
+                        return found
+        except requests.RequestException:
+            pass
+        time.sleep(0.25)
     return found
 
 
@@ -253,8 +321,30 @@ def download_product_image(
     product: PohodaProduct,
     image_dir: Path,
 ) -> ImageResult:
-    pages = search_pages(session, product)
     official = OFFICIAL_DOMAINS.get(product.brand, [])
+
+    # Fast path: direct image search. This also works when a product page blocks scraping.
+    direct_images = search_direct_images(session, product)
+    if direct_images:
+        def image_score(url: str) -> tuple[int, int]:
+            host = urlparse(url).netloc.lower().removeprefix("www.")
+            return (1 if any(d in host for d in official) else 0, -len(url))
+
+        for image_url in sorted(direct_images, key=image_score, reverse=True):
+            saved = try_download_image(session, image_url, product, image_dir)
+            if saved:
+                return ImageResult(
+                    code=product.code,
+                    name=product.name,
+                    brand=product.brand,
+                    status="OK",
+                    image_file=saved.name,
+                    image_url=image_url,
+                    source_page="Bing Images",
+                )
+
+    # Fallback: find a product page and extract og:image / JSON-LD / product image.
+    pages = search_pages(session, product)
 
     def page_score(url: str) -> tuple[int, int]:
         host = urlparse(url).netloc.lower().removeprefix("www.")
