@@ -67,3 +67,26 @@ Predajná cena = nákupná VIP cena × 2.15.
 ## Import do Shoptetu
 
 Produkty → Import → vybrať CSV. Súbor je uložený ako UTF-8 s BOM a oddeľovač je bodkočiarka `;`.
+
+## Obrázky z POHODA XML
+
+Pre skladový export z POHODY vie skript vyhľadať a stiahnuť produktové obrázky. Preferuje oficiálne weby výrobcov a spracuje štandardné POHODA `listStock` XML.
+
+### Test na 10 produktoch
+
+```bash
+python download_pohoda_images.py "ohriev.xml" --out "output/ohrievace" --limit 10
+```
+
+### Celý export
+
+```bash
+python download_pohoda_images.py "ohriev.xml" --out "output/ohrievace"
+```
+
+Výstup:
+- `output/ohrievace/obrazky/` – stiahnuté obrázky,
+- `output/ohrievace/parovanie_obrazkov.csv` – kód produktu, názov obrázka, URL a zdrojová stránka.
+
+Štandardne sa preskočia karty, ktoré už majú v POHODA XML priradený obrázok. Prepínač `--all` spracuje aj tie.
+
