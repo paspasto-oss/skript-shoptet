@@ -14,7 +14,7 @@ NS = {
     "stk": "http://www.stormware.cz/schema/version_2/stock.xsd",
 }
 
-APIFY_ACTOR_SYNC = "https://api.apify.com/v2/acts/searchapi~google-images-scraper/run-sync-get-dataset-items"
+APIFY_ACTOR_SYNC = "https://api.apify.com/v2/actors/searchapi~google-images-scraper/run-sync-get-dataset-items"
 
 OFFICIAL_DOMAINS = {
     "VAILLANT": ["vaillant.sk", "vaillant.com"],
@@ -171,6 +171,11 @@ def _run_apify_batch(api_token: str, batch: list[PohodaProduct], results_per_que
         "queries": queries,
         "maxItems": max(1, len(queries) * results_per_query),
         "maxConcurrency": 2,
+        "imageSize": "large",
+        "imageType": "photo",
+        "safeSearch": "active",
+        "country": "sk",
+        "language": "sk",
     }
     response = requests.post(
         APIFY_ACTOR_SYNC,
@@ -180,7 +185,9 @@ def _run_apify_batch(api_token: str, batch: list[PohodaProduct], results_per_que
     )
     if response.status_code in (401, 403):
         raise RuntimeError("Apify API token nie je platny alebo nema pristup.")
-    response.raise_for_status()
+    if response.status_code >= 400:
+        detail = response.text[:1200]
+        raise RuntimeError(f"Apify chyba {response.status_code}: {detail}")
     data = response.json()
     if not isinstance(data, list):
         raise RuntimeError("Apify vratilo necakany format odpovede.")
