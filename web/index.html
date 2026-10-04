@@ -71,24 +71,80 @@ $("#xml").addEventListener("change", async e => {
   }catch(err){$("#status").textContent=err.message;$("#status").className="status bad"}
 });
 
+const OFFICIAL = {
+  "VAILLANT":["vaillant.sk","vaillant.com"],
+  "STIEBEL ELTRON":["stiebel-eltron.sk","stiebel-eltron.com"],
+  "ARISTON":["ariston.com"],
+  "DRAŽICE":["dzd.cz","drazice.cz"],
+  "DRAZICE":["dzd.cz","drazice.cz"],
+  "CLAGE":["clage.com"],"HAKL":["hakl.sk"],"MORA":["mora.sk","mora.cz"],
+  "TESY":["tesy.com"],"CONCEPT":["my-concept.sk","my-concept.cz"]
+};
+function brandFromName(name=""){
+  const up=name.toUpperCase();
+  return Object.keys(OFFICIAL).sort((a,b)=>b.length-a.length).find(b=>up.startsWith(b+" ")||up===b)||(name.split(/\s+/)[0]||"").toUpperCase();
+}
+function hostMatches(host,domains){
+  host=String(host||"").toLowerCase().replace(/^www\./,"").split(":")[0];
+  return domains.some(d=>host===d||host.endsWith("."+d));
+}
+function queryFor(p){
+  const brand=p.brand||brandFromName(p.name), domains=OFFICIAL[brand]||[];
+  const short=p.name.split(/\s+/).slice(0,8).join(" ");
+  return domains.length?`${p.code} ${short} site:${domains[0]}`:`${p.code} ${short}`;
+}
+function score(p,item){
+  const brand=p.brand||brandFromName(p.name),domains=OFFICIAL[brand]||[];
+  const host=item.hostPageDomain||item.sourceDomain||item.domain||"";
+  const official=domains.length&&hostMatches(host,domains)?1e9:0;
+  const text=[item.title,item.altText,item.sourceName].filter(Boolean).join(" ").toLowerCase();
+  const code=text.includes(String(p.code).toLowerCase())?1e7:0;
+  const tokens=p.name.toLowerCase().split(/[^a-z0-9]+/).filter(t=>t.length>=3);
+  const ts=tokens.reduce((n,t)=>n+(text.includes(t)?1000:0),0);
+  const px=Number(item.sizePixels||0)||Number(item.width||0)*Number(item.height||0);
+  return official+code+ts+px;
+}
+async function apifyBatch(batch,token){
+  const queries=batch.map(queryFor);
+  const url="https://api.apify.com/v2/actors/searchapi~google-images-scraper/run-sync-get-dataset-items?token="+encodeURIComponent(token);
+  const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+    mode:"batch",queries,maxItems:Math.max(queries.length*8,8),maxConcurrency:2
+  })});
+  const raw=await r.text();
+  if(!r.ok) throw new Error(`Apify ${r.status}: ${raw.slice(0,900)}`);
+  let items; try{items=JSON.parse(raw)}catch{throw new Error("Apify vrátil neplatnú odpoveď")}
+  const by=new Map(queries.map(q=>[q,[]]));
+  for(const item of Array.isArray(items)?items:[]){
+    const q=item.query||item.searchQuery;
+    if(by.has(q))by.get(q).push(item);
+  }
+  return batch.map(p=>{
+    const brand=p.brand||brandFromName(p.name), domains=OFFICIAL[brand]||[], q=queryFor(p);
+    const cand=(by.get(q)||[]).sort((a,b)=>score(p,b)-score(p,a));
+    const verified=cand.filter(item=>!domains.length||hostMatches(item.hostPageDomain||item.sourceDomain||item.domain||"",domains));
+    const chosen=verified.find(item=>item.imageUrl||item.originalUrl||item.url)||null;
+    return {...p,brand,query:q,status:chosen?"OK":"NENAJDENE",
+      imageUrl:chosen?(chosen.imageUrl||chosen.originalUrl||chosen.url):"",
+      hostPageUrl:chosen?(chosen.hostPageUrl||chosen.sourceUrl||""):"",
+      hostPageDomain:chosen?(chosen.hostPageDomain||chosen.sourceDomain||chosen.domain||""):"",
+      title:chosen?(chosen.title||chosen.altText||""):"",
+      width:chosen?Number(chosen.width||0):0,height:chosen?Number(chosen.height||0):0,
+      candidateCount:cand.length};
+  });
+}
 async function search(limit){
   if(!products.length){$("#status").textContent="Najprv vyber POHODA XML.";return}
   const token=$("#token").value.trim();
-  const selected=products.slice(0,limit || products.length);
-  $("#status").textContent="Vyhľadávam...";
-  $("#status").className="status";
-  $("#run").disabled=$("#test").disabled=true;
-  $("#results").innerHTML="";
+  if(!token){$("#status").textContent="Zadaj Apify API token.";return}
+  const selected=products.slice(0,limit||products.length);
+  $("#status").textContent="Vyhľadávam...";$("#status").className="status";
+  $("#run").disabled=$("#test").disabled=true;$("#results").innerHTML="";
   const all=[];
   try{
     for(let i=0;i<selected.length;i+=20){
       const batch=selected.slice(i,i+20);
       $("#status").textContent=`Spracúvam ${i+1}–${Math.min(i+20,selected.length)} z ${selected.length}...`;
-      const r=await fetch("/api/search",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({products:batch,token})});
-      const data=await r.json();
-      if(!r.ok) throw new Error(data.error || "Chyba servera");
-      all.push(...data.results);
-      render(all);
+      all.push(...await apifyBatch(batch,token)); render(all);
     }
     const ok=all.filter(x=>x.status==="OK").length;
     $("#status").textContent=`Hotovo: ${ok}/${all.length} nájdených.`;
