@@ -171,9 +171,6 @@ def _run_apify_batch(api_token: str, batch: list[PohodaProduct], results_per_que
         "queries": queries,
         "maxItems": max(1, len(queries) * results_per_query),
         "maxConcurrency": 2,
-        "imageSize": "large",
-        "imageType": "photo",
-        "safeSearch": "active",
     }
     response = requests.post(
         APIFY_ACTOR_SYNC,
