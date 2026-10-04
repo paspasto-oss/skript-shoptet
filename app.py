@@ -27,6 +27,7 @@ class App:
         self.input_path = StringVar()
         self.template_path = StringVar()
         self.image_xml_path = StringVar()
+        self.apify_token = StringVar()
         self.out_dir = StringVar(value=str(Path("output").resolve()))
         self.db_path = StringVar(value=str(Path("data/products.sqlite").resolve()))
         self.limit_10 = BooleanVar(value=True)
@@ -64,20 +65,24 @@ class App:
         Button(self.root, text="3. EXPORT XML FEED", width=24, height=2, command=self.export_xml).place(x=450, y=305)
         Button(self.root, text="4. CSV KONTROLA", width=24, height=2, command=self.export_db).place(x=660, y=305)
 
-        Label(self.root, text="POHODA XML - produktove obrazky", font=("Arial", 12, "bold")).place(x=22, y=385)
+        Label(self.root, text="POHODA XML - produktove obrazky cez Apify", font=("Arial", 12, "bold")).place(x=22, y=385)
         Entry(self.root, textvariable=self.image_xml_path, width=80).place(x=250, y=388)
         Button(self.root, text="Vybrat XML", command=self.choose_image_xml).place(x=805, y=384)
+
+        Label(self.root, text="Apify API token:").place(x=22, y=430)
+        Entry(self.root, textvariable=self.apify_token, width=80, show="*").place(x=250, y=430)
+
         Button(
             self.root,
-            text="STIAHNUT OBRAZKY Z POHODA XML",
+            text="STIAHNUT OBRAZKY CEZ APIFY",
             width=38,
             height=2,
             command=self.download_images,
-        ).place(x=250, y=430)
+        ).place(x=250, y=470)
 
-        Button(self.root, text="KONTROLA CSV IMPORTU", width=34, command=self.validate_shoptet).place(x=330, y=500)
+        Button(self.root, text="KONTROLA CSV IMPORTU", width=34, command=self.validate_shoptet).place(x=330, y=535)
 
-        Label(self.root, textvariable=self.status, wraplength=900, justify="left").place(x=25, y=555)
+        Label(self.root, textvariable=self.status, wraplength=900, justify="left").place(x=25, y=590)
 
     def choose_input(self) -> None:
         selected = filedialog.askopenfilename(
@@ -134,10 +139,14 @@ class App:
         if not xml_path.exists():
             messagebox.showerror(APP_TITLE, "Vyber platny POHODA XML subor.")
             return
+        token = self.apify_token.get().strip()
+        if not token:
+            messagebox.showerror(APP_TITLE, "Zadaj Apify API token.")
+            return
         out_dir = Path(self.out_dir.get()) / "pohoda_obrazky"
         out_dir.mkdir(parents=True, exist_ok=True)
-        self.status.set("Vyhladavam a stahujem produktove obrazky. Pri vacsom XML to moze chvilu bezat...")
-        threading.Thread(target=self._image_worker, args=(xml_path, out_dir), daemon=True).start()
+        self.status.set("Apify vyhladava Google Images a stahuje overene produktove obrazky...")
+        threading.Thread(target=self._image_worker, args=(xml_path, out_dir, token), daemon=True).start()
 
     def import_to_db(self) -> None:
         input_file = Path(self.input_path.get())
@@ -192,7 +201,7 @@ class App:
         self.status.set("Kontrolujem pripravenost CSV importu...")
         threading.Thread(target=self._validation_worker, args=(db_path, out_dir), daemon=True).start()
 
-    def _image_worker(self, xml_path: Path, out_dir: Path) -> None:
+    def _image_worker(self, xml_path: Path, out_dir: Path, token: str) -> None:
         try:
             limit = 10 if self.limit_10.get() else None
             results = run_downloader(
@@ -200,6 +209,7 @@ class App:
                 out_dir=out_dir,
                 missing_only=True,
                 limit=limit,
+                api_token=token,
             )
             ok = sum(1 for r in results if r.status == "OK")
             missing = len(results) - ok
