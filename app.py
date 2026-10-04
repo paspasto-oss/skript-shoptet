@@ -9,60 +9,79 @@ from tkinter import BooleanVar, Button, Checkbutton, Entry, Label, StringVar, Tk
 from shoptet_importer.database import ProductDatabase
 from shoptet_importer.db_export import export_db_to_shoptet_csv
 from shoptet_importer.import_router import import_file_to_products
+from shoptet_importer.pohoda_image_downloader import run_downloader
 from shoptet_importer.shoptet_ready import create_shoptet_validation_report
 from shoptet_importer.shoptet_xml_feed import export_db_to_shoptet_xml
 from shoptet_importer.validation import validate_products
 
-APP_TITLE = "Spektra Product Manager"
+APP_TITLE = "Spektra Product Collector"
 
 
 class App:
     def __init__(self) -> None:
         self.root = Tk()
         self.root.title(APP_TITLE)
-        self.root.geometry("920x580")
+        self.root.geometry("960x660")
         self.root.resizable(False, False)
 
         self.input_path = StringVar()
         self.template_path = StringVar()
+        self.image_xml_path = StringVar()
         self.out_dir = StringVar(value=str(Path("output").resolve()))
         self.db_path = StringVar(value=str(Path("data/products.sqlite").resolve()))
         self.limit_10 = BooleanVar(value=True)
-        self.status = StringVar(value="Vyber cennik dodavatela. Hlavny vystup pre Shoptet je products.xml.")
+        self.status = StringVar(
+            value="Vyber zdrojovy subor. Pre POHODA XML mozes priamo stiahnut produktove obrazky."
+        )
 
-        Label(self.root, text="Spektra Product Manager", font=("Arial", 18, "bold")).place(x=20, y=18)
-        Label(self.root, text="Import cennikov dodavatelov do DB, export Shoptet XML feed + CSV kontrola", font=("Arial", 10)).place(x=22, y=55)
+        Label(self.root, text="Spektra Product Collector", font=("Arial", 20, "bold")).place(x=20, y=18)
+        Label(
+            self.root,
+            text="Produkty, ceny, obrazky a exporty pre POHODU / Shoptet",
+            font=("Arial", 10),
+        ).place(x=22, y=58)
 
-        Label(self.root, text="Cennik dodavatela:").place(x=22, y=95)
-        Entry(self.root, textvariable=self.input_path, width=88).place(x=160, y=95)
-        Button(self.root, text="Vybrat", command=self.choose_input).place(x=765, y=91)
+        Label(self.root, text="Cennik / zdroj:").place(x=22, y=100)
+        Entry(self.root, textvariable=self.input_path, width=88).place(x=160, y=100)
+        Button(self.root, text="Vybrat", command=self.choose_input).place(x=785, y=96)
 
-        Label(self.root, text="Shoptet CSV sablona:").place(x=22, y=135)
-        Entry(self.root, textvariable=self.template_path, width=88).place(x=160, y=135)
-        Button(self.root, text="Vybrat", command=self.choose_template).place(x=765, y=131)
+        Label(self.root, text="Shoptet CSV sablona:").place(x=22, y=140)
+        Entry(self.root, textvariable=self.template_path, width=88).place(x=160, y=140)
+        Button(self.root, text="Vybrat", command=self.choose_template).place(x=785, y=136)
 
-        Label(self.root, text="Databaza:").place(x=22, y=175)
-        Entry(self.root, textvariable=self.db_path, width=88).place(x=160, y=175)
-        Button(self.root, text="Vybrat", command=self.choose_db).place(x=765, y=171)
+        Label(self.root, text="Databaza:").place(x=22, y=180)
+        Entry(self.root, textvariable=self.db_path, width=88).place(x=160, y=180)
+        Button(self.root, text="Vybrat", command=self.choose_db).place(x=785, y=176)
 
-        Label(self.root, text="Vystup:").place(x=22, y=215)
-        Entry(self.root, textvariable=self.out_dir, width=88).place(x=160, y=215)
-        Button(self.root, text="Vybrat", command=self.choose_out_dir).place(x=765, y=211)
+        Label(self.root, text="Vystup:").place(x=22, y=220)
+        Entry(self.root, textvariable=self.out_dir, width=88).place(x=160, y=220)
+        Button(self.root, text="Vybrat", command=self.choose_out_dir).place(x=785, y=216)
 
-        Checkbutton(self.root, text="Test iba 10 produktov", variable=self.limit_10).place(x=160, y=255)
+        Checkbutton(self.root, text="Test iba 10 produktov", variable=self.limit_10).place(x=160, y=258)
 
-        Button(self.root, text="1. IMPORT CENNIKA DO DB", width=28, height=2, command=self.import_to_db).place(x=35, y=305)
-        Button(self.root, text="2. PRODUKTOVY EDITOR", width=24, height=2, command=self.open_editor).place(x=285, y=305)
-        Button(self.root, text="3. EXPORT XML FEED", width=26, height=2, command=self.export_xml).place(x=500, y=305)
-        Button(self.root, text="4. CSV KONTROLA", width=24, height=2, command=self.export_db).place(x=720, y=305)
+        Button(self.root, text="1. IMPORT DO DB", width=24, height=2, command=self.import_to_db).place(x=30, y=305)
+        Button(self.root, text="2. PRODUKTOVY EDITOR", width=24, height=2, command=self.open_editor).place(x=240, y=305)
+        Button(self.root, text="3. EXPORT XML FEED", width=24, height=2, command=self.export_xml).place(x=450, y=305)
+        Button(self.root, text="4. CSV KONTROLA", width=24, height=2, command=self.export_db).place(x=660, y=305)
 
-        Button(self.root, text="KONTROLA CSV IMPORTU", width=34, command=self.validate_shoptet).place(x=340, y=380)
+        Label(self.root, text="POHODA XML - produktove obrazky", font=("Arial", 12, "bold")).place(x=22, y=385)
+        Entry(self.root, textvariable=self.image_xml_path, width=80).place(x=250, y=388)
+        Button(self.root, text="Vybrat XML", command=self.choose_image_xml).place(x=805, y=384)
+        Button(
+            self.root,
+            text="STIAHNUT OBRAZKY Z POHODA XML",
+            width=38,
+            height=2,
+            command=self.download_images,
+        ).place(x=250, y=430)
 
-        Label(self.root, textvariable=self.status, wraplength=860, justify="left").place(x=25, y=455)
+        Button(self.root, text="KONTROLA CSV IMPORTU", width=34, command=self.validate_shoptet).place(x=330, y=500)
+
+        Label(self.root, textvariable=self.status, wraplength=900, justify="left").place(x=25, y=555)
 
     def choose_input(self) -> None:
         selected = filedialog.askopenfilename(
-            title="Vyber cennik dodavatela",
+            title="Vyber zdrojovy subor",
             filetypes=[
                 ("Podporovane subory", "*.pdf *.csv *.xlsx *.xml"),
                 ("PDF subory", "*.pdf"),
@@ -74,6 +93,14 @@ class App:
         )
         if selected:
             self.input_path.set(selected)
+
+    def choose_image_xml(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Vyber POHODA XML export",
+            filetypes=[("POHODA XML", "*.xml"), ("Vsetky subory", "*.*")],
+        )
+        if selected:
+            self.image_xml_path.set(selected)
 
     def choose_template(self) -> None:
         selected = filedialog.askopenfilename(
@@ -101,6 +128,16 @@ class App:
         )
         if selected:
             self.db_path.set(selected)
+
+    def download_images(self) -> None:
+        xml_path = Path(self.image_xml_path.get())
+        if not xml_path.exists():
+            messagebox.showerror(APP_TITLE, "Vyber platny POHODA XML subor.")
+            return
+        out_dir = Path(self.out_dir.get()) / "pohoda_obrazky"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self.status.set("Vyhladavam a stahujem produktove obrazky. Pri vacsom XML to moze chvilu bezat...")
+        threading.Thread(target=self._image_worker, args=(xml_path, out_dir), daemon=True).start()
 
     def import_to_db(self) -> None:
         input_file = Path(self.input_path.get())
@@ -155,6 +192,33 @@ class App:
         self.status.set("Kontrolujem pripravenost CSV importu...")
         threading.Thread(target=self._validation_worker, args=(db_path, out_dir), daemon=True).start()
 
+    def _image_worker(self, xml_path: Path, out_dir: Path) -> None:
+        try:
+            limit = 10 if self.limit_10.get() else None
+            results = run_downloader(
+                xml_path=xml_path,
+                out_dir=out_dir,
+                missing_only=True,
+                limit=limit,
+            )
+            ok = sum(1 for r in results if r.status == "OK")
+            missing = len(results) - ok
+            mapping = out_dir / "parovanie_obrazkov.csv"
+            images = out_dir / "obrazky"
+            self.status.set(
+                f"Obrazky hotove. Stiahnute: {ok}, nenajdene: {missing}. Priecinok: {images}"
+            )
+            messagebox.showinfo(
+                APP_TITLE,
+                f"Stahovanie obrazkov dokoncene.\n\n"
+                f"Stiahnute: {ok}\nNenajdene: {missing}\n\n"
+                f"Obrazky: {images}\nParovanie: {mapping}",
+            )
+        except Exception as exc:
+            traceback.print_exc()
+            self.status.set("Chyba pri stahovani obrazkov.")
+            messagebox.showerror(APP_TITLE, str(exc))
+
     def _import_worker(self, input_file: Path, db_path: Path) -> None:
         try:
             limit = 10 if self.limit_10.get() else None
@@ -189,7 +253,7 @@ class App:
             xml_path = out_dir / "products.xml"
             count = export_db_to_shoptet_xml(db_path, xml_path, active_only=True)
             self.status.set(f"Hotovo: {count} produktov exportovanych do XML feedu: {xml_path}")
-            messagebox.showinfo(APP_TITLE, f"XML feed pre Shoptet je pripraveny.\n\nProdukty: {count}\nSubor: {xml_path}\n\nDalsi krok: nahrat products.xml na hosting alebo GitHub Pages a URL vlozit do Shoptetu.")
+            messagebox.showinfo(APP_TITLE, f"XML feed pre Shoptet je pripraveny.\n\nProdukty: {count}\nSubor: {xml_path}")
         except Exception as exc:
             traceback.print_exc()
             self.status.set("Chyba pri XML exporte.")
@@ -205,9 +269,8 @@ class App:
                 self.status.set(f"CSV hotove, ale kontrola nasla chyby: {errors}. CSV: {csv_path}. Report: {report_path}")
                 messagebox.showwarning(APP_TITLE, f"CSV hotove, ale kontrola nasla chyby.\n\nProdukty: {count}\nChybne produkty: {errors}\nCSV: {csv_path}\nReport: {report_path}")
             else:
-                tpl = f"\nSablona: {template}" if template else "\nSablona: fallback minimalna hlavicka"
                 self.status.set(f"CSV kontrola hotova: {count} produktov. CSV: {csv_path}")
-                messagebox.showinfo(APP_TITLE, f"CSV kontrolny subor je pripraveny.\n\nProdukty: {count}\nCSV: {csv_path}{tpl}\nKontrola: bez chyb")
+                messagebox.showinfo(APP_TITLE, f"CSV kontrolny subor je pripraveny.\n\nProdukty: {count}\nCSV: {csv_path}\nKontrola: bez chyb")
         except Exception as exc:
             traceback.print_exc()
             self.status.set("Chyba pri CSV exporte.")
