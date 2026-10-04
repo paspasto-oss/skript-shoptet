@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Spektra Product Collector</title>
+<style>
+:root{font-family:Inter,Arial,sans-serif;color:#151515;background:#f5f6f8}
+*{box-sizing:border-box}body{margin:0}.wrap{max-width:1180px;margin:0 auto;padding:28px}
+header{display:flex;align-items:center;gap:16px;margin-bottom:24px}.logo{width:48px;height:48px;border-radius:50%;border:7px solid #e2202a;border-right-color:transparent}.title h1{margin:0;font-size:30px}.title p{margin:4px 0 0;color:#666}
+.card{background:white;border:1px solid #ddd;border-radius:14px;padding:20px;margin-bottom:18px;box-shadow:0 2px 10px #00000008}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field label{display:block;font-weight:700;margin-bottom:6px}.field input{width:100%;padding:11px;border:1px solid #bbb;border-radius:8px}
+button{border:0;border-radius:9px;padding:12px 18px;font-weight:700;cursor:pointer;background:#e2202a;color:white}button.secondary{background:#222}button:disabled{opacity:.5;cursor:not-allowed}
+.status{margin-top:12px;font-weight:700}.ok{color:#178b35}.bad{color:#b41520}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}.item{border:1px solid #ddd;border-radius:12px;padding:12px;background:#fff}.item img{width:100%;height:170px;object-fit:contain;background:#fafafa;border-radius:8px}.code{font-weight:800;margin-top:8px}.name{font-size:13px;color:#444;margin-top:4px;min-height:48px}.meta{font-size:12px;color:#777;margin-top:6px;word-break:break-all}.actions{display:flex;gap:8px;margin-top:10px}.actions a{padding:8px 10px;border-radius:7px;text-decoration:none;background:#222;color:#fff;font-size:12px}
+@media(max-width:700px){.row{grid-template-columns:1fr}.wrap{padding:14px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><div class="logo"></div><div class="title"><h1>Spektra Product Collector</h1><p>Vyhľadávanie produktových obrázkov pre POHODU / Shoptet</p></div></header>
+
+<div class="card">
+  <div class="row">
+    <div class="field"><label>POHODA XML</label><input id="xml" type="file" accept=".xml"></div>
+    <div class="field"><label>Apify API token</label><input id="token" type="password" placeholder="apify_api_..."></div>
+  </div>
+  <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+    <button id="run">Vyhľadať obrázky</button>
+    <button id="test" class="secondary">Test 10 produktov</button>
+    <span id="count"></span>
+  </div>
+  <div id="status" class="status"></div>
+</div>
+
+<div class="card">
+  <div id="results" class="grid"></div>
+</div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+let products = [];
+
+function localName(el){ return el?.localName || el?.nodeName?.split(":").pop(); }
+function childText(node, wanted){
+  const found = [...node.getElementsByTagName("*")].find(x => localName(x) === wanted);
+  return found?.textContent?.trim() || "";
+}
+function parseXml(text){
+  const doc = new DOMParser().parseFromString(text,"application/xml");
+  if (doc.querySelector("parsererror")) throw new Error("XML sa nepodarilo načítať.");
+  const stocks = [...doc.getElementsByTagName("*")].filter(x => localName(x)==="stock");
+  const out = [];
+  for(const stock of stocks){
+    const header = [...stock.children].find(x => localName(x)==="stockHeader");
+    if(!header) continue;
+    const code = childText(header,"code");
+    const name = childText(header,"name");
+    const hasPicture = [...header.getElementsByTagName("*")].some(x => localName(x)==="picture");
+    if(code && name && !hasPicture) out.push({code,name});
+  }
+  return out;
+}
+
+$("#xml").addEventListener("change", async e => {
+  try{
+    const f=e.target.files[0]; if(!f)return;
+    products=parseXml(await f.text());
+    $("#count").textContent=`${products.length} produktov bez obrázka`;
+    $("#status").textContent="XML načítané.";
+  }catch(err){$("#status").textContent=err.message;$("#status").className="status bad"}
+});
+
+async function search(limit){
+  if(!products.length){$("#status").textContent="Najprv vyber POHODA XML.";return}
+  const token=$("#token").value.trim();
+  const selected=products.slice(0,limit || products.length);
+  $("#status").textContent="Vyhľadávam...";
+  $("#status").className="status";
+  $("#run").disabled=$("#test").disabled=true;
+  $("#results").innerHTML="";
+  const all=[];
+  try{
+    for(let i=0;i<selected.length;i+=20){
+      const batch=selected.slice(i,i+20);
+      $("#status").textContent=`Spracúvam ${i+1}–${Math.min(i+20,selected.length)} z ${selected.length}...`;
+      const r=await fetch("/api/search",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({products:batch,token})});
+      const data=await r.json();
+      if(!r.ok) throw new Error(data.error || "Chyba servera");
+      all.push(...data.results);
+      render(all);
+    }
+    const ok=all.filter(x=>x.status==="OK").length;
+    $("#status").textContent=`Hotovo: ${ok}/${all.length} nájdených.`;
+    $("#status").className="status "+(ok?"ok":"bad");
+  }catch(err){$("#status").textContent=err.message;$("#status").className="status bad"}
+  finally{$("#run").disabled=$("#test").disabled=false}
+}
+
+function render(items){
+  $("#results").innerHTML=items.map(x=>`
+    <div class="item">
+      ${x.imageUrl ? `<img src="${x.imageUrl}" alt="">` : `<div style="height:170px;display:grid;place-items:center;background:#fafafa;border-radius:8px">Nenájdené</div>`}
+      <div class="code">${x.code}</div>
+      <div class="name">${x.name}</div>
+      <div class="meta">${x.hostPageDomain || ""}</div>
+      <div class="actions">
+        ${x.imageUrl ? `<a href="${x.imageUrl}" target="_blank">Obrázok</a>` : ""}
+        ${x.hostPageUrl ? `<a href="${x.hostPageUrl}" target="_blank">Zdroj</a>` : ""}
+      </div>
+    </div>`).join("");
+}
+$("#run").onclick=()=>search();
+$("#test").onclick=()=>search(10);
+</script>
+</body>
+</html>
